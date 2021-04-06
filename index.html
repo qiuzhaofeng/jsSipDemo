@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>Page Title</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="js/jquery.min.js"></script>
+    <script src="js/md5.js"></script>
+    <script src="js/jssip.3.6.1.min.js"></script>
+    <style>
+        *{margin: 0; padding: 0; list-style: none; font-size: 14px; font-family: 'Times New Roman', Times, "微软雅黑", "Mircsoft YaHei", serif;}
+        video{ width: 400px; height: 300px; background-color: #000;}
+        .left{float: left;}
+        .over-hidden{overflow: hidden;}
+
+    </style>
+</head>
+<body>
+    <div class="over-hidden">
+        <div class="left">
+            <p>本地视频</p>
+            <video id="local" muted></video>
+        </div>
+        <div class="left" style="margin-left: 10px;">
+            <p>对方视频</p>
+            <video id="remote"></video>
+        </div>
+    </div>
+    <div>
+        <audio id="remoteAudio"></audio>
+    </div>
+    <div>
+        <ul>
+            <li>
+                <span>wss地址</span><input id="wss" type="text" value="wss://192.168.60.27:7443"/> <span>注：线上版本必须使用wss与https 本地测试可使用ws与http</span>
+            </li>
+            <li>
+                <span>我的sip</span><input id="mySip" value="sip:70000002@192.168.60.27:5065" type="text" placeholder="请输入完成的sip"/>
+            </li>
+            <li>
+                <span>密码</span><input id="pwd" value="1234" type="text" placeholder="请输入密码"/>
+            </li>
+            <li>
+                <button id="startBtn">启动注册</button>
+            </li>
+            <li>
+                <span>对方sip</span><input id="remoteSip" type="text" placeholder="请输入完成的sip"/>
+            </li>
+            <li>
+                <button id="mekeCallBtn">音视频呼叫</button>
+                <button id="remoteAudioBtn">音频呼叫</button>
+                <button id="endBtn">结束通话</button>
+            </li>
+        </ul>
+    </div>
+    <div style="display: none;" id="isRemoteCall">
+        <h2 style="font-size: 40px;">电话进入</h2>
+        <button id="answer">接听</button>
+        <button id="cancel">拒绝</button>
+    </div>
+    <div style=" border-top:  1px solid #000000;">
+        <h3>语音会议</h3>
+        <ul>
+            <li>用户：<input id="userName" type="text" placeholder="请输入用户"/></li>
+            <li>密码：<input id="pwdMet" type="text" placeholder="请输入密码"/></li>
+            <li>会议名称：<input id="metName" type="text" placeholder="请输入会议名称"/></li>
+            <li>会议成员：<input id="metPeople" type="text" placeholder="会议成员多个以‘，’分割"/></li>
+            <li><button id="createMet">创建会议</button></li>
+        </ul>
+        <div>会议号码：<span id="metNumber"></span> <button id="launchMeeting">发起会议</button><span>会议状态：</span><span id="metState"></span></span></div>
+        <div>
+            <audio id="metAudio"></audio>
+        </div>
+    </div>
+    <script>
+        var ua,session;
+        //启动按钮
+        var startBtn = document.getElementById('startBtn');
+        //呼叫按钮
+        var makeCallBtn = document.getElementById('mekeCallBtn');
+        //挂断按钮
+        var endBtn = document.getElementById('endBtn');
+        //对方视频
+        var remoteMediaElement = document.getElementById('remote');
+        //本地视频
+        var localMediaElement = document.getElementById('local');
+        //对方音频
+        var remoteAudio = document.getElementById('remoteAudio');
+        //音频呼叫按钮
+        var remoteAudioBtn = document.getElementById('remoteAudioBtn');
+        //启动按钮点击
+        startBtn.onclick = function(){
+            //获取用户输入值
+            var socketUrl = document.getElementById('wss').value;
+            var mySip = document.getElementById('mySip').value;
+            var pwd = document.getElementById('pwd').value;
+            //创建socket
+            var socket = new JsSIP.WebSocketInterface(socketUrl);
+            //配置项
+            var configuration = {
+                sockets  : [ socket ],
+                uri      : mySip,
+                password : pwd
+            };
+            //创建ua
+            ua = new JsSIP.UA(configuration);
+            //监听ua连接
+            ua.on('connected',function(e){
+                //已连接触发
+                alert('ua已连接')
+            });
+            ua.on('disconnected',function(e){
+                alert("ua已断开")
+            })
+            //启动
+            ua.start();
+            //ua添加事件，监测是否有对方电话接入
+            ua.on('newRTCSession',function(data){
+                var originator = data.originator;
+                if(originator == 'remote'){
+                    $('#isRemoteCall').css({"display":"block"});
+                    console.log('datahahaha:',data.request);
+                    session = data.session;
+                    session.on('confirmed',function(data){
+                        setupRemoteMedia(session);
+                        setupLocalMedia(session)
+                    })
+                }
+            })
+
+        }
+        //音频呼叫
+        remoteAudioBtn.onclick = function(){
+            var remoteSip = document.getElementById('remoteSip').value;
+            var eventHandlers={
+                'confirmed': function(e) {
+                    //已接听
+                    var remoteStream = new MediaStream();
+                    remoteStream = session.connection.getRemoteStreams()[0];
+                    remoteAudio.srcObject = remoteStream;
+                    remoteAudio.play();
+                }
+            }
+            var options = {
+                'eventHandlers':eventHandlers,
+                'mediaConstraints':{ 'audio': true, 'video': false},
+                //mediaConstraints 表示媒体类型，为音频还是视频
+            };
+            session = ua.call(remoteSip,options);
+
+        }
+        //接听
+        $('#answer').click(function(){
+            $('#isRemoteCall').hide();
+            var options = {
+                'mediaConstraints':{ 'audio': true, 'video': true}
+            }
+            session.answer(options);
+        });
+        //拒绝
+        $('#cancel').click(function(){
+            session.terminate();
+            session = null;
+            $('#isRemoteCall').hide();
+        })
+        //呼叫按钮点击
+        mekeCallBtn.onclick = function(){
+            //获取对方的sip地址
+            var remoteSip = document.getElementById('remoteSip').value;
+            //添加各个事件
+            var eventHandlers = {
+                'progress': function(e) {
+                    //信令连接已建立
+                    setupLocalMedia(session)
+                },
+                'failed': function(e) {
+                    //通话失败 对方拒绝或对方未接听时本地挂断,或未找到对象或sip出现错误
+                    console.log(e)
+                },
+                'ended': function(e) {
+                    //通话结束
+                    localMediaElement.srcObject = null;
+                    remoteMediaElement.srcObject = null;
+                    localMediaElement.pause();
+                    remoteMediaElement.pause();
+                },
+                'confirmed': function(e) {
+                    //已接听
+                    setupRemoteMedia(session)
+                }
+            }
+            var options = {
+                'eventHandlers':eventHandlers,
+                'mediaConstraints':{ 'audio': true, 'video': true}
+                //mediaConstraints 表示媒体类型，为音频还是视频
+            };
+            session = ua.call(remoteSip,options);
+            //session 为链接对象，用于挂断等操作，session.id可获取session的id 多路通话时应创建多路session,需创建多路session的管理
+        }
+        //添加对方媒体流
+        function setupRemoteMedia(session){
+            var remoteStream = new MediaStream();
+            remoteStream = session.connection.getRemoteStreams()[0]
+            remoteMediaElement.srcObject = remoteStream;
+            remoteMediaElement.play();
+        }
+        //添加本地媒体流
+        function setupLocalMedia(session){
+            var localStrem = new MediaStream();
+            localStrem = session.connection.getLocalStreams()[0]
+            localMediaElement.srcObject = localStrem;
+            localMediaElement.play();
+        }
+        //结束通话
+        endBtn.onclick = function(){
+            session.terminate();
+            session = null;
+        }
+    
+
+        //会议相关
+        //创建会议
+        $('#createMet').click(function(){
+            var userName = $('#userName').val();
+            var pwd = md5($('#pwdMet').val());
+            var metName = $('#metName').val();
+            var metPeople = $('#metPeople').val();
+            var pl = metPeople.split(',').length
+            var data='{"createId":"'+userName+'","conferenceName":"'+metName+'","groupId":"","conferenceType":"0","conferenceUserNum":"'+pl+'","meetingMember":"'+metPeople+'","compType":"0","size":"0"}'
+            $.ajax({
+                url:'https://192.168.60.27:8443/androidApi/voip/createMeetingRoom.action?userId='+userName+'&userPwd='+pwd+'&userType=2',
+                type:'post',
+                dataType:'json',
+                data:{
+                    data:data
+                },success:function(data){
+                    if(data.result=="success"){
+                        $("#metNumber").text(data.conferenceId);
+                        $("#metNumber").attr('data-people',metPeople);
+                        $("#metNumber").attr('data-pwd',pwd);
+                        $("#metNumber").attr('data-user',userName);
+                    }else{
+                        alert("失败了")
+                    }
+                }
+            })
+        })
+        //发起会议
+        $('#launchMeeting').click(function(){
+
+
+            var metNumber = $('#metNumber').text();
+            if(!metNumber){
+                alert("请先创建会议")
+                return false;
+            }
+            var meetingMember = $('#metNumber').attr('data-people');
+            var user = $('#metNumber').attr('data-user');
+            var pwd = $('#metNumber').attr('data-pwd');
+            $.ajax({
+                url:'https://192.168.60.27:8443/androidApi/voip/launchMeeting.action',
+                type:"get",
+                dataType:'json',
+                data:{
+                    conferenceId:metNumber,
+                    meetingMember:meetingMember,
+                    userId:user,
+                    userPwd:pwd,
+                    userType:'2'
+                },
+                success:function(data){
+                    var eventHandlers = {
+                        'progress': function(e) {
+                            //信令连接已建立
+                        },
+                        'failed': function(e) {
+                            //通话失败 对方拒绝或对方未接听时本地挂断,或未找到对象或sip出现错误
+                            $('#metState').text('进入会议失败');
+                        },
+                        'ended': function(e) {
+                            //通话结束
+                            $('#metState').text('已退出会议');
+                        },
+                        'confirmed': function(e) {
+                            //已接听
+                            $('#metState').text('进入会议成功');
+                            var metAudio = document.getElementById('metAudio');
+                            var remoteStream = new MediaStream();
+                            remoteStream = session.connection.getRemoteStreams()[0];
+                            metAudio.srcObject = remoteStream;
+                            metAudio.play();
+                        }
+                    }
+                    var options = {
+                        eventHandlers:eventHandlers,
+                        'mediaConstraints':{ 'audio': true, 'video': false}
+                        //mediaConstraints 表示媒体类型，为音频还是视频
+                    };
+                    session = ua.call(metNumber,options)
+                }
+            })
+        })
+    </script>
+</body>
+</html>
